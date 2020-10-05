@@ -980,3 +980,62 @@ QUIC 的流量控制也是通过 window_update，来告诉对端它可以接受�
 QUIC 的 ACK 是基于 offset 的，每个 offset 的包来了，进了缓存，就可以应答，应答后就不会重发，中间的空档会等待到来或者重发即可。
 
 ![](./images/network-49.png)
+
+
+
+#### HTTPS
+
+##### 加密
+
+###### 对称加密
+
+对称加密算法中，加密和解密使用的密钥是相同的。
+
+###### 非对称加密
+
+非对称加密的私钥放在外卖网站这里，不会在互联网上传输，这样就能保证这个密钥的私密性。但是，对应私钥的公钥，是可以在互联网上随意传播的，只要外卖网站把这个公钥给你，你们就可以愉快地互通了。
+
+###### 数字证书
+
+这个由权威部门颁发的称为证书（Certificate）。证书里面有
+
++ 公钥
++ 证书的所有者
++ 证书的发布机构
++ 证书的有效期
+
+权威机构会用CA 的私钥给这个证书卡一个章，我们称为签名算法。
+
+```shell
+#创建私钥。
+openssl genrsa -out cliu8siteprivate.key 1024
+#再根据这个私钥，创建对应的公钥。
+openssl rsa -in cliu8siteprivate.key -pubout -outcliu8sitepublic.pem
+
+# 签名证书
+openssl x509 -req -in cliu8sitecertificate.req -CA cacertificate.pem -CAkey caprivate.key -out cliu8sitecertificate.pem
+# 查看证书内容
+openssl x509 -in cliu8sitecertificate.pem -noout -text 
+```
+
+要想验证证书，需要 CA 的公钥。CA 的公钥也需要更牛的 CA 给它签名，然后形成 CA 的证书。直到全球皆知的几个著名大 CA，称为 **root CA**
+
+
+
+##### 工作模式
+
+![](./images/network-50.png)
+
++ 客户端会发送 Client Hello 消息到服务器，以明文传输 TLS 版本信息、加密套件候选列表、压缩算法候选列表等信息， 还会有一个随机数，在协商对称密钥的时候使用。
++ 网站返回 Server Hello 消息, 告诉客户端，服务器选择使用的协议版本、加密套件、压缩算法等，还有一个随机数，用于后续的密钥协商。
++ 网站会给你一个服务器端的证书，客户端验证证书。
++ 证书验证完毕之后，觉得这个网站可信，于是客户端计算产生随机数字 Pre-master，发送 Client Key Exchange，用证书中的公钥加密，再发送给服务器，服务器可以通过私钥解密出来。
++ 客户端还是服务器，都有了三个随机数，分别是：**自己的、对端的，以及刚生成的 Pre-Master 随机数。通过这三个随机数，可以在客户端和服务器产生相同的对称密钥。**
++ 有了对称密钥，客户端就可以说：“Change Cipher Spec，以后都采用协商的通信密钥和加密算法进行加密通信了。”，发送一个 Encrypted Handshake Message。
++ 服务器也可以发送 Change Cipher Spec，并且也发送 Encrypted Handshake Message 的消息。
+
+
+
+##### 重放与篡改
+
+有了加密和解密，黑客截获了包也打不开了，但是它可以发送 N 次。这个往往通过 Timestamp 和 Nonce 随机数联合起来，然后做一个不可逆的签名来保证。
