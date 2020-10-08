@@ -1351,4 +1351,27 @@ ATM 是传输之前先建立一个连接，形成一个虚拟的通路，一旦�
 
 
 
-需要设备认这个标签，并且能够根据这个标签转发，这种能够转发标签的路由器称为标签交换路由器（LSR，Label Switching Router）
+需要设备认这个标签，并且能够根据这个标签转发，这种能够转发标签的路由器称为**标签交换路由器（LSR，Label Switching Router）**。这种路由器会有两个表格，一个就是传统的 FIB，也即**路由表**，另一个就是 LFIB，**标签转发表**。
+
+![](./images/network-77.png)
+
+**LDP（Label Distribution Protocol）**，是一个动态的生成标签的协议生成标签
+
+![](./images/network-78.png)
+
+
+
+在 MPLS VPN 中，网络中的路由器分成以下几类：
+
++ PE（Provider Edge）：运营商网络与客户网络相连的边缘网络设备
++ CE（Customer Edge）：客户网络与 PE 相连接的边缘设备
++ P（Provider）：这里特指运营商网络中除 PE 之外的其他运营商网络设备。
+
+在 PE 上，可以通过 **VRF（VPN Routing&Forwarding Instance）建立每个客户一个路由表，与其它 VPN 客户路由和普通路由相互区分**。可以理解为专属于客户的小路由器
+
+**VPN 报文转发采用两层标签方式**
+
++ **外层标签在骨干网内部进行交换**，指示从 PE 到对端 PE 的一条 LSP。
++ **内层标签在从对端 PE 到达 CE 时使用**，在 PE 上，通过查找 VRF 表项，指示报文应被送到哪个 VPN 用户，或者更具体一些，到达哪一个 CE。
+
+![](./images/network-79.png)
