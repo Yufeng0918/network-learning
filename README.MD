@@ -1375,3 +1375,95 @@ ATM 是传输之前先建立一个连接，形成一个虚拟的通路，一旦�
 + **内层标签在从对端 PE 到达 CE 时使用**，在 PE 上，通过查找 VRF 表项，指示报文应被送到哪个 VPN 用户，或者更具体一些，到达哪一个 CE。
 
 ![](./images/network-79.png)
+
+
+
+#### 移动网络
+
+##### 2G网络
+
+基站子系统分两部分，
+
++ 基站收发信台：BTS，Base Transceiver Station，对外提供无线通信，
++ 基站控制器台：BSC，Base Station Controller， 对内连接有线网络
+
+移动业务交换中心: MSC，Mobile Service Switching Center，它是进入核心网的入口
+
+网关移动交换中心: GMSC ，Gateway Mobile Switching Center, 连接核心网和真正的互联网
+
+鉴权中心: AUC，Authentication Center
+
+访问位置寄存器: VLR，Visit Location Register
+
+归属位置寄存器: HLR，Home Location Register
+
+![](./images/network-80.png)
+
+##### 2.5G网络
+
+分组控制单元（PCU，Packet Control Unit），用以提供分组交换通道
+
+**SGSN，Service GPRS Supported Node**
+
+**GGSN，Gateway GPRS Supported Node**
+
+![](./images/network-82.png)
+
+##### 3G网络
+
+**无线网络控制器（RNC，Radio Network Controller）**
+
+![](./images/network-81.png)
+
+##### 4G网络
+
+eNodeB: 基站
+
+MME: 核心控制网元，是控制面的核
+
+HSS: 用于存储用户签约信息的数据库，其实就是你这个号码归属地是哪里的
+
+SGW: 连上核心网
+
+PGW: 出口网关
+
+PCRF：称为策略和计费控制单元，用来控制上网策略和流量的计费。
+
+![](./images/network-83.png)
+
+###### 控制面协议
+
+eNodeB，并通过 S1-MME 接口，请求 MME 对这个手机进行认证和鉴权
+
+eNodeB 和 MME 之间的连接就是很正常的 IP 网络和 SCTP协议
+
++ 多宿主：引入了联合（association）的概念，将多个接口、多条路径放到一个联合中来，提高可用性
++ 联合分成多个流： 每个流独立传输
++ 四次握手：防止 SYN 攻击
+  + 客户机使用一个 INIT 报文发起一个连接
+  + 服务器使用一个 INIT-ACK 报文进行响应，其中就包括了 Cookie。
+  + 客户端就使用一个 COOKIE-ECHO 报文进行响应，其中包含了服务器所发送的 Cookie。
+  + 服务器为这个连接分配资源，并通过向客户机发送一个 COOKIE-ACK 报文对其进行响应。
++ 三次挥手断开连接
++ 消息分帧
+
+###### 数据面协议
+
+eNodeB 经过 S1-U 协议，通过第一段隧道到达 SGW，再从 SGW 经过 S8 协议，通过第二段隧道到达 PGW
+
+###### 上网流程
+
+![](./images/network-84.png)
+
++ 手机开机以后，寻找基站 eNodeB，找到后给 eNodeB 发送 Attach Request。
++ eNodeB 将请求发给 MME
++ MME 去请求手机，一是认证，二是鉴权，还会请求 HSS 看看有没有余额
++ 当 MME 通过了手机的认证之后，开始分配隧道，先告诉 SGW，说要创建一个会话（Create Session）。在这里面，会给 SGW 分配一个隧道 ID t1，并且请求 SGW 给自己也分配一个隧道 ID。
++ SGW 转头向 PGW 请求建立一个会话，为 PGW 的控制面分配一个隧道 ID t2，也给 PGW 的数据面分配一个隧道 ID t3，并且请求 PGW 给自己的控制面和数据面分配隧道 ID。
++ PGW 回复 SGW 说“创建会话成功”
+  + 使用自己的控制面隧道 ID t2，回复里面携带着给 SGW 控制面分配的隧道 ID t4 
+  + 体用自己的数据面隧道 ID t3，回复里面携带着给 SGW 数据面分配的隧道 ID t5 
++ SGW 回复 MME 说“创建会话成功”，使用自己的隧道 ID t1 访问 MME，回复里面有给 MME 分配隧道 ID t6，也有 SGW 给 eNodeB 分配的隧道 ID t7。
++ MME告诉 eNodeB，“后面的隧道已经建设完毕，SGW 给你分配的隧道 ID 是 t7
++ eNodeB 告诉 MME 自己给 SGW 分配一个隧道，ID 为 t8。
++ MME 将 eNodeB 给 SGW 分配的隧道 ID t8 告知 SGW，从而前面的隧道也建设完毕。
