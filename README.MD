@@ -1859,3 +1859,137 @@ ip netns exec 12065 ip addr add 172.17.0.2/16 dev eth0 ip netns exec 12065 ip li
 
 + 通过桥接的方式实现一台物理机上的容器进行相互访问
 + 如果要访问外网，最简单的方式还是通过 NAT。
+
+
+
+### 4.2 Flannel
+
+对于 IP 冲突的问题，如果每一个物理机都是网段 172.17.0.0/16，肯定会冲突啊，但是这个网段实在太大了，一台物理机上根本启动不了这么多的容器，所以**每台物理机在这个大网段里面，抠出一个小的网段，每个物理机网段都不同，自己看好自己的一亩三分地，谁也不和谁冲突。**例如物理机 A 是网段 172.17.8.0/24，物理机 B 是网段 172.17.9.0/24，
+
+#### UDP 方案
+
++ 在物理机 A 上的容器 A 里面，能看到的容器的 IP 地址是 172.17.8.2/24，里面设置了默认的路由规则 default via 172.17.8.1 dev eth0。
+
++ 如果容器 A 要访问 172.17.9.2，就会发往这个默认的网关 172.17.8.1。172.17.8.1 就是物理机上面 docker0 网桥的 IP 地址，这台物理机上的所有容器都是连接到这个网桥的。
+
++ 物理机 A 上的 flanneld 会**将网络包封装在 UDP 包里面，然后外层加上物理机 A 和物理机 B 的 IP 地址，发送给物理机 B 上的 flanneld。**
+
++ 物理机 B 上的 flanneld 收到包之后，解开 UDP 的包，将里面的网络包拿出来，从物理机 B 的 flannel.1 网卡发出去。
+
++ 在物理机 B 上，**有路由规则 172.17.9.0/24 dev docker0 proto kernel scope link src 172.17.9.1。**
+
+![](./images/network-117.png)
+
+#### VXLAN 方案
+
+如果使用 VXLAN，就不需要打开一个 TUN 设备了，而是要建立一个 VXLAN 的 VTEP
+
+![](./images/network-118.png)
+
++ 当网络包从物理机 A 上的容器 A 发送给物理机 B 上的容器 B，在容器 A 里面通过默认路由到达物理机 A 上的 docker0 网卡，然后根据路由规则，在物理机 A 上，将包转发给 flannel.1。这个时候 flannel.1 就是一个 VXLAN 的 VTEP 了，它将网络包进行封装。
+  + 内部的 MAC 地址这样写：源为物理机 A 的 flannel.1 的 MAC 地址，目标为物理机 B 的 flannel.1 的 MAC 地址，**在外面加上 VXLAN 的头。**
+  + 外层的 IP 地址这样写：源为物理机 A 的 IP 地址，目标为物理机 B 的 IP 地址，外面加上物理机的 MAC 地址。
++ 能通过 VXLAN 将包转发到另一台机器，从物理机 B 的 flannel.1 上解包，变成内部的网络包，通过物理机 B 上的路由转发到 docker0，然后转发到容器 B 里面。通信成功。
+
+
+
+### 4.3 Calico
+
+Calico 网络的大概思路，即不走 Overlay 网络，不引入另外的网络性能损耗，而是将转发全部用三层网络的路由转发来实现
+
+![](./images/network-119.png)
+
+#### 路由
+
+veth1 就是这个 MAC 地址。所以容器 A1 里发出的网络包，第一跳就是这个 veth1 这个网卡
+
+```properties
+default via 169.254.1.1 dev eth0 
+169.254.1.1 dev eth0 scope link 
+169.254.1.1 dev eth0 lladdr ee:ee:ee:ee:ee:ee STALE
+```
+
+在物理机 A 上有三条路由规则，分别是去两个本机的容器的路由，以及去 172.17.9.0/24，下一跳为物理机 B。
+
+```properties
+172.17.8.2 dev veth1 scope link 
+172.17.8.3 dev veth2 scope link 
+172.17.9.0/24 via 192.168.100.101 dev eth0 proto bird onlink
+```
+
+物理机 B 上也有三条路由规则，分别是去两个本机的容器的路由，以及去 172.17.8.0/24，下一跳为物理机 A。
+
+````properties
+172.17.9.2 dev veth1 scope link 
+172.17.9.3 dev veth2 scope link 
+172.17.8.0/24 via 192.168.100.100 dev eth0 proto bird onlink
+````
+
+![](./images/network-120.png)
+
+
+
+#### 架构
+
+#### 路由配置组件 Felix
+
+一台物理机上，每创建一个容器，也需要多配置一条指向这个容器的路由。需要每台物理机上有一个 agent，当创建和删除容器的时候，自动做这件事情。这个 agent 在 Calico 中称为 **Felix**。
+
+
+
+#### 路由广播组件 BGP Speaker
+
+Calico 使用的是 BGP 协议。在 Calico 中，每个 Node 上运行一个软件 BIRD，或者叫作 BGP Speaker，将“如何到达我这个 Node，访问我这个 Node 上的容器”的路由信息广播出去。
+
+
+
+#### 安全策略组件
+
+![](./images/network-121.png)
+
+**cali-fip-dnat**，实现浮动 IP（Floating IP）的场景，主要将外网的 IP 地址 dnat 作为容器内的 IP 地址。
+
+**cali-wl-to-host**，wl 的意思是 workload，也即容器，也即这是用来判断从容器发到物理机的网络包是否符合规则的。这里面内嵌一个规则 **cali-from-wl-dispatch**，也是匹配从容器来的包。如果有两个容器，则会有两个容器网卡，这里面内嵌有详细的规则“cali-fw-cali 网卡 1”和“cali-fw-cali 网卡 2”，fw 就是 from workload，也就是匹配从容器 1 来的网络包和从容器 2 来的网络包。
+
+**cali-FORWARD**。这里面分两种情况
+
++ 一种是从容器里面发出来，转发到外面的；匹配的规则是 **cali-from-wl-dispatch**。
+
++ 一种是从外面发进来，转发到容器里面的。匹配的规则是 **cali-to-wl-dispatch**
+
+**cali-fip-snat**，也即发出去的时候，将容器网络 IP 转换为浮动 IP 地址
+
+
+
+#### 全连接复杂性
+
+出了一个组件 BGP Route Reflector，它也是用 BIRD 实现的。有了它，BGP Speaker 就不用全互连了，而是都直连它，它负责将全网的路由信息广播出去。
+
+一个机架就像一个数据中心，可以把它设置为一个 AS，而 BGP Router Reflector 有点儿像数据中心的边界路由器。在一个 AS 内部，也即服务器和 BGP Router Reflector 之间使用的是数据中心内部的路由协议 iBGP，BGP Router Reflector 之间使用的是数据中心之间的路由协议 eBGP。
+
+![](./images/network-122.png)
+
+一个机架上有多台机器，每台机器上面启动多个容器，每台机器上都有可以到达这些容器的路由。每台机器上都启动一个 BGP Speaker，**然后将这些路由规则上报到这个 Rack 上接入交换机的 BGP Route Reflector，将这些路由通过 iBGP 协议告知到接入交换机的三层路由功能。**
+
+
+
+#### 跨网段访问
+
+Calico 模式还有一个问题，就是跨网段问题，**这里的跨网段是指物理机跨网段。**
+
+物理机 A 的网段是 192.168.100.100/24，物理机 B 的网段是 192.168.200.101/24，这样两台机器就不能通过二层交换机连接起来了，需要在中间放一台路由器，做一次路由转发，才能跨网段访问
+
+Calico 的 IPIP 模式。使用了 IPIP 模式之后，在物理机 A 上，我们能看到这样的路由表：
+
+```properties
+172.17.8.2 dev veth1 scope link 
+172.17.8.3 dev veth2 scope link 
+172.17.9.0/24 via 192.168.200.101 dev tun0 proto bird onlink
+```
+
+容器 A1 里面的 172.17.8.2，去 ping 容器 B1 里面的 172.17.9.2，首先会到物理机 A。在物理机 A 上根据上面的规则，会转发给 tun0，并在这里对包做封装：
+
++ 内层源 IP 为 172.17.8.2
++ 内层目标 IP 为 172.17.9.2
++ 外层源 IP 为 192.168.100.100
++ 外层目标 IP 为 192.168.200.101。
