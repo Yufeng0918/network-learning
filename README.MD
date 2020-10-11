@@ -1573,7 +1573,7 @@ MAC 层
 
 ##### VLAN 功能
 
-access por：
+access port
 
 + 这些端口被打上了 VLAN Tag。
 + 离开交换机的 Access port 进入计算机的以太帧中**没有 VLAN Tag**，连接到 access ports 的机器不会觉察到 VLAN 的存在。
@@ -1705,3 +1705,157 @@ pfifo_fast 分为三个先入先出的队列，称为三个 Band。priomap，也
 
 + 一个是 rate，表示一般情况下的速度
 + 一个是 ceil，表示最高情况下的速度。
+
+
+
+### 3.5 隔离 GER && VXLAN
+
+#### GRE
+
+Generic Routing Encapsulation，它是一种 IP-over-IP 的隧道技术。它将 IP 包封装在 GRE 包里，外面加上 IP 头，在隧道的一端封装数据包，并在通路上进行传输，到另外一端的时候解封装。你可以认为 Tunnel 是一个虚拟的、点对点的连接。
+
+![](./images/network-106.png)
+
+GRE: 32bit key 用于表示VXLAN
+
+NVGRE：24bit virtual subnet id 表示VXLAN
+
+![](./images/network-107.png)
+
++ 主机 A 在左边的网络，IP 地址为 192.168.1.102，它想要访问主机 B，主机 B 在右边的网络，IP 地址为 192.168.2.115。于是发送一个包，源地址为 192.168.1.102，目标地址为 192.168.2.115。**因为要跨网段访问，要发给默认的网关 192.168.1.1，也即左边的路由器**
++ 根据路由表，**从左边的路由器，去 192.168.2.0/24 这个网段，应该走一条 GRE 的隧道，从隧道一端的网卡 Tunnel0 进入隧道。在 Tunnel 隧道的端点进行包的封装，**在内部的 IP 头之外加上 GRE 头。对于 NVGRE 来讲，是在 MAC 头之外加上 GRE 头，然后加上外部的 IP 地址，也即路由器的外网 IP 地址。源 IP 地址为 172.17.10.10，目标 IP 地址为 172.16.11.10，然后从 E1 的物理网卡发送到公共网络里。
++ 当网络包到达对端路由器的时候，也要到达对端的 Tunnel0，然后开始解封装，将外层的 IP 头取下来，然后根据里面的网络包，根据路由表，从 E3 口转发出去到达服务器 B。
+
+
+
+#### VXLAN
+
+VXLAN 则是从二层外面就套了一个 VXLAN 的头，这里面包含的 VXLAN ID 为 24 位，也够用了。在 VXLAN 头外面还封装了 UDP、IP，以及外层的 MAC 头。
+
+![](./images/network-108.png)
+
+VXLAN 作为扩展性协议，也需要一个地方对 VXLAN 的包进行封装和解封装，实现这个功能的点称为 VTEP（VXLAN Tunnel Endpoint）。
+
+VXLAN 不是点对点的，而是支持通过组播的来定位目标机器的，而非一定是这一端发出，另一端接收。当一个 VTEP 启动的时候，它们都需要通过 IGMP 协议。加入一个组播组。
+
+![](./images/network-110.png)
+
++ 虚拟机 1 发现，它不知道虚拟机 2 的 MAC 地址，因而包没办法发出去，于是要发送 ARP 广播。
++ ARP 请求到达 VTEP1 的时候，VTEP1 知道，我这里有一台虚拟机，要访问一台不归我管的虚拟机，需要知道 MAC 地址，可是我不知道啊。VTEP1 想，可以在VTEP组 @all 一下，问问虚拟机 2 归谁管。于是 VTEP1 将 ARP 请求封装在 VXLAN 里面，组播出去。
++ VTEP2 和 VTEP3 都收到了消息，因而都会解开 VXLAN 包看，里面是一个 ARP。
++ VTEP3 在本地广播了半天，没人回，都说虚拟机 2 不归自己管。
++ VTEP2 在本地广播，虚拟机 2 回了，说虚拟机 2 归我管，MAC 地址是这个。通过这次通信，**VTEP2 也学到了，虚拟机 1 归 VTEP1 管，以后要找虚拟机 1，去找 VTEP1 就可以了。**
+
+![](./images/network-109.png)
+
++ VTEP2 将 ARP 的回复封装在 VXLAN 里面，这次不用组播了，直接发回给 VTEP1。
++ VTEP1 解开 VXLAN 的包，发现是 ARP 的回复，于是发给虚拟机 1。通过这次通信，**VTEP1 也学到了，虚拟机 2 归 VTEP2 管，以后找虚拟机 2，去找 VTEP2 就可以了。**
++ 虚拟机 1 的 ARP 得到了回复，知道了虚拟机 2 的 MAC 地址，于是就可以发送包了。虚拟机 1 发给虚拟机 2 的包到达 VTEP1，它记得刚要找虚拟机 2，就去 VTEP2，于是将包封装在 VXLAN 里面，**外层加上 VTEP1 和 VTEP2 的 IP 地址，发送出去。**
++ 网络包到达 VTEP2 之后，VTEP2 解开 VXLAN 封装，将包转发给虚拟机 2。虚拟机 2 回复的包，到达 VTEP2 的时候，它也记得刚才学的东西，要找虚拟机 1，就去 VTEP1，**于是将包封装在 VXLAN 里面，外层加上 VTEP1 和 VTEP2 的 IP 地址，也发送出去。**
+
+![](./images/network-111.png)
+
+#### 云计算架构
+
+![](./images/network-112.png)
+
+## 4. 容器网络
+
+### 4.1 隔离 
+
+#### 环境隔离 Namesapce
+
+网络的 namespace 由 ip netns 命令操作。它可以创建、删除、查询 namespace。routerns 相当于一个路由器，一断连接容器的docker0网桥，一端连接物理网卡
+
+![](./images/network-113.png)
+
+```SHELL
+# 创建一个 routerns，于是一个独立的网络空间就产生了。你可以在里面尽情设置自己的规则。
+ip netns add routerns
+
+# forward 开关要打开
+ip netns exec routerns sysctl -w net.ipv4.ip_forward=1
+
+# 路由器需要有一张网卡连到 br0 上，因而要创建一个网卡。
+ovs-vsctl -- add-port br0 taprouter -- set Interface taprouter type=internal -- set Interface taprouter external-ids:iface-status=active -- set Interface taprouter external-ids:attached-mac=fa:16:3e:84:6e:cc
+
+# 网卡加入namesapce
+ip link set taprouter netns routerns
+
+# 要给这个网卡配置一个 IP 地址，当然应该是虚拟机网络的网关地址。例如虚拟机私网网段为 192.168.1.0/24，网关的地址往往为 192.168.1.1。
+ip netns exec routerns ip -4 addr add 192.168.1.1/24 brd 192.168.1.255 scope global dev taprouter
+
+# 为了访问外网，还需要另一个网卡连在外网网桥 br-ex 上，并且塞在 namespace 里面。
+ovs-vsctl -- add-port br-ex taprouterex -- set Interface taprouterex type=internal -- set Interface taprouterex external-ids:iface-status=active -- set Interface taprouterex external-ids:attached-mac=fa:16:3e:68:12:c0
+ip link set taprouterex netns routerns
+
+# 为了访问外网，还需要另一个网卡连在外网网桥 br-ex 上，并且塞在 namespace 里面。
+ip netns exec routerns ip -4 addr add 16.158.1.100/24 brd 16.158.1.255 scope global dev taprouterex
+
+# 就需要配置路由表，路由表是这样的
+ip netns exec routerns route -nKernel IP routing tableDestination Gateway Genmask Flags Metric Ref Use Iface0.0.0.0 16.158.1.1 0.0.0.0 UG 0 0 0 taprouterex192.168.1.0 0.0.0.0 255.255.255.0 U 0 0 0 taprouter16.158.1.0 0.0.0.0 255.255.255.0 U 0 0 0 taprouterex
+
+# 这里面有两个规则
+# 一个是 SNAT，将虚拟机的私网 IP 192.168.1.3 NAT 成物理外网 IP 16.158.1.103。
+# 一个是 DNAT，将物理外网 IP 16.158.1.103 NAT 成虚拟机私网 IP 192.168.1.3。
+ip netns exec routerns iptables -t nat -nvL
+Chain PREROUTING
+target  prot opt  in  out  source  destination
+DNAT  all  --  *  *  0.0.0.0/0 16.158.1.103 to:192.168.1.3
+Chain POSTROUTING
+target  prot opt  in  out  source   destination
+SNAT  all  --  *  *  192.168.1.3  0.0.0.0/0 to:16.158.1.103
+```
+
+
+
+#### 资源隔离 Cgroup
+
+cgroup有很多子系统：
+
++ CPU 子系统使用调度程序为进程控制 CPU 的访问
++ memory 子系统，设置进程的内存限制以及产生内存资源报告；
++ blkio 子系统，设置限制每个块设备的输入输出控制；
++ net_cls，**这个子系统使用等级识别符（classid）标记网络数据包，可允许 Linux 流量控制程序（tc）识别从具体 cgroup 中生成的数据包。**
+
+cgroup 提供了一个虚拟文件系统，作为进行分组管理和各子系统设置的用户接口。要使用 cgroup，必须挂载 cgroup 文件系统，一般情况下都是挂载到 /sys/fs/cgroup
+
+![](./images/network-114.png)
+
+
+
+#### 容器加入物理网络
+
+![](./images/network-115.png)
+
+```shell
+# 在 Linux 下，可以创建一对 veth pair 的网卡，从一边发送包，另一边就能收到。
+ip link add name veth1 mtu 1500 type veth peer name veth2 mtu 1500
+
+# 其中一边可以打到 docker0 网桥上。
+ip link set veth1 master testbr    
+ip link set veth1 up
+
+# 另一端放到容器里, 通过软连接
+docker inspect '--format={{ .State.Pid }}' test
+rm -f /var/run/netns/12065    
+ln -s /proc/12065/ns/net /var/run/netns/12065
+
+# 将另一端 veth2 塞到 namespace 里面
+ip link set veth2 netns 12065
+ip netns exec 12065 ip link set veth2 name eth0
+
+# 给容器内网卡设置 ip 地址。
+ip netns exec 12065 ip addr add 172.17.0.2/16 dev eth0 ip netns exec 12065 ip link set eth0 up
+```
+
+
+
+所有从容器内部发出来的包，都要做地址伪装，将源 IP 地址，转换为物理网卡的 IP 地址。如果有多个容器，所有的容器共享一个外网的 IP 地址，
+
+![](./images/network-116.png)
+
+容器网络连接到物理网络的方式和虚拟机很像
+
++ 通过桥接的方式实现一台物理机上的容器进行相互访问
++ 如果要访问外网，最简单的方式还是通过 NAT。
