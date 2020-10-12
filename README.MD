@@ -2205,7 +2205,7 @@ Content-Length: nnn
 
 
 
-### 5.4 Dubbo
+### 5.4 二进制RPC Dubbo
 
 Dubbo 会在客户端的本地启动一个 Proxy，其实就是客户端的 Stub，对于远程的调用都通过这个 Stub 进行封装。
 
@@ -2242,7 +2242,103 @@ C          # RPC call
 
 Netty 是一个非阻塞的基于事件的网络传输框架，在服务端启动的时候，会监听一个端口，并注册以下的事件。
 
-+ 连接事件，当收到客户端的连接事件时，会调用 void connected(Channel channel) 方法。
-+ 可写事件，会调用 void sent(Channel channel, Object message)，服务端向客户端返回响应数据。
-+ 可读事件，会调用 void received(Channel channel, Object message) ，服务端在收到客户端的请求数据。
-+ 当发生异常时，会调用 void caught(Channel channel, Throwable exception)。
++ **连接事件**，当收到客户端的连接事件时，会调用 void connected(Channel channel) 方法。
++ **可写事件，**会调用 void sent(Channel channel, Object message)，服务端向客户端返回响应数据。
++ **可读事件**，会调用 void received(Channel channel, Object message) ，服务端在收到客户端的请求数据。
++ **发生异常**，会调用 void caught(Channel channel, Throwable exception)。
+
+
+
+### 5.5 跨语言RPC GRPC
+
+#### 协议约定问题
+
+Protocol Buffers 是一款压缩效率极高的序列化协议，有很多设计精巧的序列化方法。
+
+这一点上，Protocol Buffers 考虑了兼容性。在上面的协议文件中，每一个字段都有修饰符。
+
++ required：这个值不能为空，一定要有这么一个字段出现
++ optional：可选字段，可以设置，也可以不设置，如果不设置，则使用默认值
++ repeated：可以重复 0 到多次。
+
+```protobuf
+syntax = “proto3”;
+package com.geektime.grpc
+option java_package = “com.geektime.grpc”;
+message Order {
+  required string date = 1;
+  required string classname = 2;
+  required string author = 3;
+  required int price = 4;
+}
+
+message OrderResponse {
+  required string message = 1;
+}
+
+service PurchaseOrder {
+  rpc Purchase (Order) returns (OrderResponse) {}
+}
+```
+
+每一个字段，使用的是 TLV（Tag，Length，Value）的存储办法。
+
++ Tag = (field_num << 3) | wire_type。
++ field_num 就是在 proto 文件中，给每个字段指定唯一的数字标识
++ wire_type 用于标识后面的数据类型
+
+![](./images/network-130.png)
+
+#### 传输问题
+
+单向 RPC
+
+```java
+rpc SayHello(HelloRequest) returns (HelloResponse){}
+```
+
+服务端流式 RPC，即服务端返回的不是一个结果，而是一批
+
+```java
+rpc LotsOfReplies(HelloRequest) returns (stream HelloResponse){}
+```
+
+客户端流式 RPC，也即客户端的请求不是一个，而是一批
+
+```java
+rpc LotsOfGreetings(stream HelloRequest) returns (HelloResponse) {}
+```
+
+双向流式 RPC
+
+```java
+rpc BidiHello(stream HelloRequest) returns (stream HelloResponse){}
+```
+
+
+
+#### 服务发现与治理问题
+
+对于 GRPC 支持比较好的负载均衡器 Envoy。其实 Envoy 不仅仅是负载均衡器，它还是一个高性能的 C++ 写的 Proxy 转发器，可以配置非常灵活的转发规则，需要配置四个东西
+
++ listener。Envoy 既然是 Proxy，专门做转发，就得监听一个端口，接入请求，然后才能够根据策略转发，这个监听的端口就称为 listener。
++ endpoint，是目标的 IP 地址和端口。这个是 Proxy 最终将请求转发到的地方。
++ cluster，一个 cluster 是具有完全相同行为的多个 endpoint，也即如果有三个服务端在运行，就会有三个 IP 和端口，但是部署的是完全相同的三个服务，它们组成一个 cluster，从 cluster 到 endpoint 的过程称为负载均衡，可以轮询。
++ route。有时候多个 cluster 具有类似的功能，但是是不同的版本号，可以通过 route 规则，选择将请求路由到某一个版本号，也即某一个 cluster。
+
+
+
+##### 策略配置
+
+**路由策略**：例如后端的服务有两个版本，可以通过配置 Envoy 的 route，来设置两个版本之间，也即两个 cluster 之间的 route 规则，一个占 99% 的流量，一个占 1% 的流量。
+
+**负载均衡策略**：对于一个 cluster 下的多个 endpoint，可以配置负载均衡机制和健康检查机制
+
+![](./images/network-131.png)
+
+##### 治理中心
+
+![](./images/network-132.png)
+
+这就是未来服务治理的趋势 Serivce Mesh，也即应用之间的相互调用全部由 Envoy 进行代理，服务之间的治理也被 Envoy 进行代理，完全将服务治理抽象出来，到平台层解决。
+
