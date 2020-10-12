@@ -1992,4 +1992,257 @@ Calico 的 IPIP 模式。使用了 IPIP 模式之后，在物理机 A 上，我�
 + 内层源 IP 为 172.17.8.2
 + 内层目标 IP 为 172.17.9.2
 + 外层源 IP 为 192.168.100.100
-+ 外层目标 IP 为 192.168.200.101。
++ 外层目标 IP 为 192.168.200.101
+
+
+
+## 5. 微服务协议
+
+### 5.1 RPC协议
+
+#### 五个问题
+
++ 如何规定远程调用的语法
++ 如果传递参数
++ 如何表示数据:  结构体，类，大端 Big Endian 和小端 Little Endian
++ 如何知道一个服务端都实现了哪些远程调用
++ 发生了错误、重传、丢包、性能等问题怎么办？
+
+#### 协议约定问题
+
+![](./images/network-124.png)
+
+当客户端的应用想发起一个远程调用时，它实际是通过本地调用本地调用方的 Stub。它负责将调用的接口、方法和参数，通过约定的协议规范进行编码，并通过本地的 RPCRuntime 进行传输，将调用网络包发送到服务器。
+
+服务器端的 RPCRuntime 收到请求后，交给提供方 Stub 进行解码，然后调用服务端的方法，服务端执行方法，返回结果，提供方 Stub 将返回结果编码后，发送给客户端，客户端的 RPCRuntime 收到结果，发给调用方 Stub 解码得到结果，返回给客户端
+
+这里面分了三个层次
+
++ 对于用户层和服务端，都像是本地调用一样，专注于业务逻辑的处理就可以了。
++ 对于 Stub 层，处理双方约定好的语法、语义、封装、解封装。
++ 对于 RPCRuntime，主要处理高性能的传输，以及网络的错误和异常。
+
+
+
+在 RPC 的调用过程中，所有的数据类型都要封装成类似的格式。而且 RPC 的调用和结果返回，也有严格的格式
+
++ XID 唯一标识一对请求和回复。请求为 0，回复为 1。
++ RPC 有版本号，两端要匹配 RPC 协议的版本号。如果不匹配，就会返回 Deny，原因就是 RPC_MISMATCH
++ 程序有编号。如果服务端找不到这个程序，就会返回 PROG_UNAVAIL。
++ 程序有版本号。如果程序的版本号不匹配，就会返回 PROG_MISMATCH。
++ 一个程序可以有多个方法，方法也有编号，如果找不到方法，就会返回 PROC_UNAVAIL。
++ 调用需要认证鉴权，如果不通过，则 Deny。
++ 最后是参数列表，如果参数无法解析，则返回 GABAGE_ARGS。
+
+![](./images/network-125.png)
+
+
+
+有了协议定义文件，ONC RPC 会提供一个工具，根据这个文件生成客户端和服务器端的 Stub 程序。
+
+![](./images/network-126.png)
+
+
+
+#### 传输问题
+
+错误、重传、丢包、性能等问题统称为传输问题
+
+![](./images/network-127.png)
+
++ 首先，进入起始状态，查看 RPC 的传输层队列中有没有空闲的位置，可以处理新的 RPC 任务。
+  + 如果没有，说明太忙了，或直接结束或重试。
+  + 如果申请成功，就可以分配内存，获取服务的端口号，然后连接服务器。
++ 连接的过程要有一段时间，因而要等待连接的结果，会有连接失败，或直接结束或重试。如果连接成功，则开始发送 RPC 请求，然后等待获取 RPC 结果
+
+
+
+#### 服务发现问题
+
+服务发现是通过 portmapper 实现的。
+
+![](./images/network-128.png)
+
+
+
+### 5.2 SOAP
+
+#### 传输协议问题
+
+基于 XML 的最著名的通信协议就是 SOAP 了，全称简单对象访问协议（Simple Object Access Protocol）。它使用 XML 编写简单的请求和回复消息，并用 HTTP 协议进行传输。
+
+```http
+POST /purchaseOrder HTTP/1.1
+Host: www.geektime.com
+Content-Type: application/soap+xml; charset=utf-8
+Content-Length: nnn
+```
+
+```xml
+<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2001/12/soap-envelope"
+soap:encodingStyle="http://www.w3.org/2001/12/soap-encoding">
+    <soap:Header>
+        <m:Trans xmlns:m="http://www.w3schools.com/transaction/"
+          soap:mustUnderstand="1">1234
+        </m:Trans>
+    </soap:Header>
+    <soap:Body xmlns:m="http://www.geektime.com/perchaseOrder">
+        <m:purchaseOrder">
+            <order>
+                <date>2018-07-01</date>
+                <className>趣谈网络协议</className>
+                <Author>刘超</Author>
+                <price>68</price>
+            </order>
+        </m:purchaseOrder>
+    </soap:Body>
+</soap:Envelope>
+```
+
+#### 协议约定问题
+
+Web 服务描述语言，WSDL（Web Service Description Languages）。它也是一个 XML 文件。
+
+定义一个类型order
+
+```XML
+ <wsdl:types>
+  <xsd:schema targetNamespace="http://www.example.org/geektime">
+   <xsd:complexType name="order">
+    <xsd:element name="date" type="xsd:string"></xsd:element>
+<xsd:element name="className" type="xsd:string"></xsd:element>
+<xsd:element name="Author" type="xsd:string"></xsd:element>
+    <xsd:element name="price" type="xsd:int"></xsd:element>
+   </xsd:complexType>
+  </xsd:schema>
+ </wsdl:types>
+```
+
+编写一个 message 的结构是order类型
+
+```XML
+ <wsdl:message name="purchase">
+  <wsdl:part name="purchaseOrder" element="tns:order"></wsdl:part>
+ </wsdl:message>
+```
+
+定义一个端口
+
+```XML
+ <wsdl:portType name="PurchaseOrderService">
+  <wsdl:operation name="purchase">
+   <wsdl:input message="tns:purchase"></wsdl:input>
+   <wsdl:output message="......"></wsdl:output>
+  </wsdl:operation>
+ </wsdl:portType>
+```
+
+编写一个 binding，将上面定义的信息绑定到 SOAP 请求的 body 里面
+
+```XML
+<wsdl:binding name="purchaseOrderServiceSOAP" type="tns:PurchaseOrderService">
+  <soap:binding style="rpc"
+   transport="http://schemas.xmlsoap.org/soap/http" />
+  <wsdl:operation name="purchase">
+   <wsdl:input>
+    <soap:body use="literal" />
+   </wsdl:input>
+   <wsdl:output>
+    <soap:body use="literal" />
+   </wsdl:output>
+  </wsdl:operation>
+ </wsdl:binding>
+```
+
+编写 service
+
+```XML
+<wsdl:service name="PurchaseOrderServiceImplService">
+  <wsdl:port binding="tns:purchaseOrderServiceSOAP" name="PurchaseOrderServiceImplPort">
+   <soap:address location="http://www.geektime.com:8080/purchaseOrder" />
+  </wsdl:port>
+ </wsdl:service>
+```
+
+#### 服务发现问题
+
+这里有一个 UDDI（Universal Description, Discovery, and Integration），也即统一描述、发现和集成协议。它其实是一个注册中心，服务提供方可以将上面的 WSDL 描述文件，发布到这个注册中心。
+
+
+
+### 5.3 Restful
+
+#### 传输协议问题
+
+```HTTP
+POST /purchaseOrder HTTP/1.1
+Host: www.geektime.com
+Content-Type: application/json; charset=utf-8
+Content-Length: nnn
+
+{
+ "order": {
+  "date": "2018-07-01",
+  "className": "趣谈网络协议",
+  "Author": "刘超",
+  "price": "68"
+ }
+}
+```
+
+#### 协议约定问题
+
+然而 RESTful 可不仅仅是指 API，而是一种架构风格，全称 Representational State Transfer，表述性状态转移，来自一篇重要的论文《架构风格与基于网络的软件架构设计》（Architectural Styles and the Design of Network-based Software Architectures）。
+
+服务端是无状态化，这样服务端就可以横向扩展了。**其实是服务端维护资源的状态，客户端维护会话的状态。**对于服务端来讲，只有资源的状态改变了，客户端才调用 POST、PUT、DELETE 方法来找我；如果资源的状态没变，只是客户端的状态变了，就不用告诉我了，对于我来说都是统一的 GET
+
+#### 服务发现问题
+
+服务分服务提供方，它向 Eureka 做服务注册、续约和下线等操作，注册的主要数据包括服务名、机器 IP、端口号、域名等等。
+
+服务消费方，向 Eureka 获取服务提供方的注册信息。为了实现负载均衡和容错，服务提供方可以注册多个。
+
+
+
+### 5.4 Dubbo
+
+Dubbo 会在客户端的本地启动一个 Proxy，其实就是客户端的 Stub，对于远程的调用都通过这个 Stub 进行封装。
+
+Dubbo 会从注册中心获取服务端的列表，根据路由规则和负载均衡规则，在多个服务端中选择一个最合适的服务端进行调用。
+
+调用服务端的时候，首先要进行编码和序列化，形成 Dubbo 头和序列化的方法和参数。将编码好的数据，交给网络客户端进行发送，网络服务端收到消息后，进行解码。然后将任务分发给某个线程进行处理，在线程中会调用服务端的代码逻辑，然后返回结果。
+
+![](./images/network-129.png)
+
+#### 协议约定问题
+
+Dubbo 中默认的 RPC 协议是 Hessian2。为了保证传输的效率，Hessian2 将远程调用序列化为二进制进行传输，并且可以进行一定的压缩。
+
+Hessian2 不需要定义这个协议文件，而是自描述的。
+
+```assembly
+H x02 x00     # Hessian 2.0
+C          # RPC call
+ x03 add     # method "add"
+ x92        # two arguments
+ x92        # 2 - argument 1
+ x93        # 3 - argument 2
+```
+
++ H 开头，表示使用的协议是 Hession，H 的二进制是 0x48。
++ C 开头，表示这是一个 RPC 调用。
++ 0x03，表示方法名是三个字符。
++ 0x92，表示有两个参数。其实这里存的应该是 2，之所以加上 0x90，就是为了防止歧义，表示这里一定是一个 int。
++ 第一个参数是 2，编码为 0x92，第二个参数是 3，编码为 0x93
+
+#### 传输问题
+
+在 Dubbo 里面，使用了 Netty 的网络传输框架。
+
+Netty 是一个非阻塞的基于事件的网络传输框架，在服务端启动的时候，会监听一个端口，并注册以下的事件。
+
++ 连接事件，当收到客户端的连接事件时，会调用 void connected(Channel channel) 方法。
++ 可写事件，会调用 void sent(Channel channel, Object message)，服务端向客户端返回响应数据。
++ 可读事件，会调用 void received(Channel channel, Object message) ，服务端在收到客户端的请求数据。
++ 当发生异常时，会调用 void caught(Channel channel, Throwable exception)。
