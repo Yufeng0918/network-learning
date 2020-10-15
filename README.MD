@@ -906,13 +906,11 @@ HTTP 的报文大概分为三大部分。第一部分是请求行，第二部分
 
 ###### 请求行
 
-请求行在请求行中，URL 就是 http://www.163.com ，版本为 HTTP 1.1。
+URL 就是 http://www.163.com ，版本为 HTTP 1.1。 方法如下
 
-###### 方法
-
-+ GET: 去服务器获取一些资源
-+ POST: 主动告诉服务端一些信息
-+ PUT: 向指定资源位置上传最新内容
++ GET: 获取资源
++ POST: 创建资源
++ PUT: 更新资源
 + DELETE: 删除资源
 
 ###### 首部字段
@@ -942,11 +940,14 @@ HTTP 的报文大概分为三大部分。第一部分是请求行，第二部分
 
 
 
-#### HTTP 2.0
+##### HTTP 2.0
 
 HTTP 2.0 协议将一个 TCP 的连接中，切分成多个流，每个流都有自己的 ID，是双向的。
 
-HTTP 2.0 还将所有的传输信息分割为更小的消息和帧，并对它们采用二进制格式编码。常见的帧有 **Header 帧**，用于传输 Header 内容，并且会开启一个新的流。再就**是 Data 帧**，用来传输正文实体。
+HTTP 2.0 还将所有的传输信息分割为更小的消息和帧，并对它们采用二进制格式编码。
+
++ **Header 帧**，用于传输 Header 内容，并且会开启一个新的流。
++ **Data 帧**，用来传输正文实体。
 
 ![](./images/network-46.png)
 
@@ -956,27 +957,27 @@ HTTP 2.0 其实是将三个请求变成三个流，将数据分成帧，乱序�
 
 
 
-#### QUIC 协议
+##### QUIC 协议
 
-##### 连接机制
+###### 连接机制
 
-基于 UDP是以一个 64 位的随机数作为 ID 来标识，所以当 IP 或者端口变化的时候，只要 ID 不变，就不需要重新建立连接。
+基于 UDP是以一个 64 位的随机数作为 ID 来标识，所以当 IP 或者端口变化的时候，只要ID不变，就不需要重新建立连接。
 
-##### 重传机制
+###### 重传机制
 
-QUIC 也有个序列号，是递增的。任何一个序列号的包只发送一次，下次就要加一了。
+QUIC 也有个递增序列号。任何一个序列号的包只发送一次。
 
 ![](./images/network-48.png)
 
-##### 无阻塞的多路复用
+###### 无阻塞的多路复用
 
 QUIC 是基于 UDP 的，一个连接上的多个 stream 之间没有依赖。这样，假如 stream2 丢了一个 UDP 包，需要重传，但是 stream3 的包无需等待，就可以发给用户。
 
-##### 流量控制
+###### 流量控制
 
 QUIC 的流量控制也是通过 window_update，来告诉对端它可以接受的字节数。不但在一个连接上控制窗口，还在一个连接中的每个 stream 控制窗口。
 
-QUIC 的 ACK 是基于 offset 的，每个 offset 的包来了，进了缓存，就可以应答，应答后就不会重发，中间的空档会等待到来或者重发即可。
+QUIC 的 ACK 是基于 offset 的，每个 offset 的包来了，进了缓存，就可以应答，应答后就不会重发，中间的空档会等待到来或者重发即可，而窗口的起始位置为当前收到的最大 offset，从这个 offset 到当前的 stream 所能容纳的最大缓存，是真正的窗口大小。
 
 ![](./images/network-49.png)
 
@@ -1003,21 +1004,33 @@ QUIC 的 ACK 是基于 offset 的，每个 offset 的包来了，进了缓存，
 + 证书的发布机构
 + 证书的有效期
 
-权威机构会用CA 的私钥给这个证书卡一个章，我们称为签名算法。
+**权威机构会用CA 的私钥给这个证书卡一个章**，我们称为签名算法。
 
 ```shell
 #创建私钥。
 openssl genrsa -out cliu8siteprivate.key 1024
 #再根据这个私钥，创建对应的公钥。
 openssl rsa -in cliu8siteprivate.key -pubout -outcliu8sitepublic.pem
-
 # 签名证书
 openssl x509 -req -in cliu8sitecertificate.req -CA cacertificate.pem -CAkey caprivate.key -out cliu8sitecertificate.pem
 # 查看证书内容
 openssl x509 -in cliu8sitecertificate.pem -noout -text 
 ```
 
-要想验证证书，需要 CA 的公钥。CA 的公钥也需要更牛的 CA 给它签名，然后形成 CA 的证书。直到全球皆知的几个著名大 CA，称为 **root CA**
+要想验证证书，需要 CA 的公钥。**CA 的公钥也需要更牛的 CA 给它签名**，然后形成 CA 的证书。直到全球皆知的几个著名大 CA，称为 **root CA**，做最后的背书。通过这种层层授信背书的方式，从而保证了非对称加密模式的正常运转。
+
+```properties
+# Root CA
+CN=Amazon Root CA 1,O=Amazon,C=US
+CN=Amazon Root CA 2,O=Amazon,C=US
+CN=Amazon Root CA 3,O=Amazon,C=US
+CN=Amazon Root CA 4,O=Amazon,C=US
+C=DE,O=Atos,CN=Atos TrustedRoot 2011
+CN=Autoridad de Certificacion Firmaprofesional CIF A62634068,C=ES
+CN=Baltimore CyberTrust Root,OU=CyberTrust,O=Baltimore,C=IE
+CN=Buypass Class 2 Root CA,O=Buypass AS-983163327,C=NO
+CN=Buypass Class 3 Root CA,O=Buypass AS-983163327,C=NO
+```
 
 
 
@@ -1043,16 +1056,26 @@ openssl x509 -in cliu8sitecertificate.pem -noout -text
 
 #### Stream Media
 
+##### 流媒体架构
+
++ 网络协议将编码好的视频流，从主播端推送到服务器
++ 服务器上有个运行了同样协议的服务端来接收这些网络包
++ 通过一个视频的分发网络，将视频预先加载到就近的边缘节点。**分发网络分为中心和边缘两层**
++ 观众看一个视频直播是从一个边缘节点拉流
++ 然后进行解码播放
+
+![](./images/network-133.png)
+
+![](./images/network-134.png)
+
 ##### 编码
 
-###### 图片压缩
+###### 压缩
 
-+ 空间冗余
-+ 时间冗余
-+ 视觉冗余
++ 空间冗余：图像的相邻像素之间有较强的相关性，不是突变的，没必要每个像素都完整地保存
++ 时间冗余：视频中连续出现的图片也不是突变的，可以根据已有的图片进行预测和推断
++ 视觉冗余：视觉系统对某些细节不敏感
 + 编码冗余：不同像素值出现的概率不同，概率高的用的字节少，概率低的用的字节多
-
-
 
 ###### 流派
 
@@ -1063,9 +1086,7 @@ openssl x509 -in cliu8sitecertificate.pem -noout -text
 
 ![](./images/network-51.png)
 
-###### 流程
 
-![](./images/network-52.png)
 
 ###### 帧分类
 
@@ -1079,13 +1100,34 @@ openssl x509 -in cliu8sitecertificate.pem -noout -text
 
 一个视频，可以拆分成一系列的帧，每一帧拆分成一系列的片，每一片都放在一个 NALU （Network Abstraction Layer Unit）里面，NALU 之间都是通过特殊的起始标识符分隔，在每一个 I 帧的第一片前面，要插入单独保存 SPS 和 PPS 的 NALU，最终形成一个长长的 NALU 序列。
 
+![](./images/network-135.png)
+
+在 NALU 头里面，主要的内容是类型 NAL Type。
+
++ 0x07 表示 SPS，**序列参数集**， 包括一个图像序列的所有信息，如图像尺寸、视频格式等
++ 0x08 表示 PPS，**图像参数集**，包括一个图像的所有分片的所有相关信息，包括图像类型、序列号等。
+
+![](./images/network-136.png)
+
 
 
 ###### 推流
 
-RTMP 是基于 TCP 的，因而肯定需要双方建立一个 TCP 的连接。必须沟通版本号和时间戳。推流的过程，就是将 NALU 放在 Message 里面发送，这个也称为 RTMP Packet 包。Message 的格式就像这样。
+RTMP 是基于 TCP 的，因而肯定需要双方建立一个 TCP 的连接。必须沟通版本号和时间戳。
 
-![](./images/network-53.png)
++ 客户端发送 C0 表示自己的版本号，不必等对方的回复，然后发送 C1 表示自己的时间戳。
++ 服务器只有在收到 C0 的时候，才能返回 S0，表明自己的版本号，如果版本不匹配，可以断开连接。服务器发送完 S0 后就直接发送自己的时间戳 S1。
++ 客户端收到 S1 的时候，发一个知道了对方时间戳的 ACK C2。同理服务器收到 C1 的时候，发一个知道了对方时间戳的 ACK S2。
+
+![](./images/network-137.png)
+
+
+
+
+
+推流的过程，就是将 NALU 放在 Message 里面发送，这个也称为 RTMP Packet 包。Message 的格式就像这样。RTMP 在收发数据的时候并不是以 Message 为单位的，而是把 Message 拆分成 Chunk 发送，而且必须在一个 Chunk 发送完成之后，才能开始发送下一个 Chunk。
+
+![](./images/network-138.png)
 
 ![](./images/network-54.png)
 
@@ -1153,10 +1195,10 @@ DNS 服务器，一定要设置成高可用、高并发和分布式的。
 
 ##### 解析流程
 
-+ 电脑客户端会发出一个 DNS 请求，问 www.163.com 的 IP 是啥啊，并发给本地域名服务器 (本地 DNS)， 本地 DNS 由你的网络服务商。
++ 客户端会发出一个 DNS 请求，问 www.163.com 的 IP 是啥啊，并发给本地域名服务器 (本地 DNS)， 本地 DNS 由你的网络服务商。
 + 本地 DNS 会去问它的根域名服务器， 根域名服务器是最高层次的，**全球共有 13 套。**
 + 根 DNS 收到来自本地 DNS 的请求，发现后缀是 .com，这个域名是由.com 区域管理，我给你它的顶级域名服务器的地址。
-+ 本地 DNS 转向问顶级域名服务器， 顶级域名服务器就是大名鼎鼎的比如 .com、.net、 .org 这些一级域名，它负责管理二级域名，比如 163.com。顶级域名服务器说：“我给你负责 www.163.com 区域的权威 DNS 服务器的地址。”
++ 本地 DNS 转向问顶级域名服务器， 顶级域名服务器就是比如 .com、.net、 .org 这些一级域名，它负责管理二级域名，比如 163.com。顶级域名服务器说：“我给你负责 www.163.com 区域的权威 DNS 服务器的地址。”
 + 本地 DNS 转向问权威 DNS 服务， 权威 DNS 服务器查询后将对应的 IP 地址 X.X.X.X 告诉本地 DNS。
 
 ![](./images/network-59.png)
@@ -1177,6 +1219,8 @@ DNS 服务器，一定要设置成高可用、高并发和分布式的。
 
 + 第一层 GSLB，通过查看请求它的本地 DNS 服务器所在的运营商，就知道用户所在的运营商。假设是移动，通过 CNAME 的方式，通过另一个别名 object.yd.yourcompany.com，告诉本地 DNS 服务器去请求第二层的 GSLB。
 + 第二层 GSLB，通过查看请求它的本地 DNS 服务器所在的地址，就知道用户所在的地理位置，然后将距离用户位置比较近的 Region 里面，六个内部负载均衡（SLB，Server Load Balancer）的地址，返回给本地 DNS 服务器。
++ 本地 DNS 服务器将结果返回给本地 DNS 解析器。
++ 本地 DNS 解析器将结果缓存后，返回给客户端。客户端开始访问属于相同运营商的距离较近的 Region 1 中的对象存储，**客户端得到了六个 IP 地址，它可以通过负载均衡的方式，随机或者轮询选择一个可用区进行访问。**对象存储一般会有三个备份，从而可以实现对存储读写的负载均衡。
 
 ##### 问题
 
