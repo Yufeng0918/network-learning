@@ -1478,6 +1478,8 @@ ATM 是传输之前先建立一个连接，形成一个虚拟的通路，一旦�
 
 ##### 2G网络
 
+网络是公共交换电话网（PSTN，Public Switched Telephone Network）
+
 基站子系统分两部分，
 
 + 基站收发信台：BTS，Base Transceiver Station，对外提供无线通信，
@@ -1529,9 +1531,9 @@ PCRF：称为策略和计费控制单元，用来控制上网策略和流量的�
 
 ###### 控制面协议
 
-eNodeB，并通过 S1-MME 接口，请求 MME 对这个手机进行认证和鉴权
+eNodeB通过**S1-MME协议栈**，请求 MME 对这个手机进行认证和鉴权
 
-eNodeB 和 MME 之间的连接就是很正常的 IP 网络和 SCTP协议
+eNodeB 和 MME 之间的连接就是 **IP协议 + SCTP协议**
 
 + 多宿主：引入了联合（association）的概念，将多个接口、多条路径放到一个联合中来，提高可用性
 + 联合分成多个流： 每个流独立传输
@@ -1545,7 +1547,7 @@ eNodeB 和 MME 之间的连接就是很正常的 IP 网络和 SCTP协议
 
 ###### 数据面协议
 
-eNodeB 经过 S1-U 协议，通过第一段隧道到达 SGW，再从 SGW 经过 S8 协议，通过第二段隧道到达 PGW
+eNodeB 经过 **S1-U 协议**，通过第一段隧道到达 SGW，再从 SGW 经过 S8 协议，通过第二段隧道到达 PGW
 
 ###### 上网流程
 
@@ -1555,18 +1557,21 @@ eNodeB 经过 S1-U 协议，通过第一段隧道到达 SGW，再从 SGW 经过 
 + eNodeB 将请求发给 MME
 + MME 去请求手机，一是认证，二是鉴权，还会请求 HSS 看看有没有余额
 + 当 MME 通过了手机的认证之后，开始分配隧道，先告诉 SGW，说要创建一个会话（Create Session）。在这里面，会给 SGW 分配一个隧道 ID t1，并且请求 SGW 给自己也分配一个隧道 ID。
-+ SGW 转头向 PGW 请求建立一个会话，为 PGW 的控制面分配一个隧道 ID t2，也给 PGW 的数据面分配一个隧道 ID t3，并且请求 PGW 给自己的控制面和数据面分配隧道 ID。
++ SGW 转头向 PGW 请求建立一个会话
+  + 给PGW 的控制面分配一个隧道 ID t2
+  + 给PGW 的数据面分配一个隧道 ID t3
+  + 并且请求 PGW 给自己的控制面和数据面分配隧道 ID。
 + PGW 回复 SGW 说“创建会话成功”
   + 使用自己的控制面隧道 ID t2，回复里面携带着给 SGW 控制面分配的隧道 ID t4 
   + 体用自己的数据面隧道 ID t3，回复里面携带着给 SGW 数据面分配的隧道 ID t5 
 + SGW 回复 MME 说“创建会话成功”，使用自己的隧道 ID t1 访问 MME，回复里面有给 MME 分配隧道 ID t6，也有 SGW 给 eNodeB 分配的隧道 ID t7。
 + MME告诉 eNodeB，“后面的隧道已经建设完毕，SGW 给你分配的隧道 ID 是 t7
-+ eNodeB 告诉 MME 自己给 SGW 分配一个隧道，ID 为 t8。
-+ MME 将 eNodeB 给 SGW 分配的隧道 ID t8 告知 SGW，从而前面的隧道也建设完毕。
++ **eNodeB 告诉 MME 自己给 SGW 分配一个隧道，ID 为 t8。**
++ **MME 将 eNodeB 给 SGW 分配的隧道 ID t8 告知 SGW**，从而前面的隧道也建设完毕。
 
 
 
-## 3. 云计算网络了
+## 3. 云计算网络
 
 ### 3.1 虚拟网卡
 
