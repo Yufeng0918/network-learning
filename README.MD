@@ -1639,8 +1639,12 @@ vconfig，可以基于物理网卡 eth0 **创建带 VLAN 的虚拟网卡**，所
 
 ### 3.2 软件定义网络
 
+![](./images/network-142.png)
+
 + 控制与转发分离
-+ 控制平面与转发平面之间的开放接口
+  + 转发平面就是一个个虚拟或者物理的网络设备
+  + 控制平面就是统一的控制中心
++ 开放接口
   + 控制器向上提供接口，被应用层调用
   + 控制器向下调用接口，来控制网络设备
 + 逻辑上的集中控制：逻辑上集中的控制平面可以控制多个转发面设备，也就是控制整个物理网络。
@@ -1651,7 +1655,7 @@ vconfig，可以基于物理网卡 eth0 **创建带 VLAN 的虚拟网卡**，所
 
 OpenFlow 是 SDN 控制器和网络设备之间互通的南向接口协议，OpenvSwitch 用于创建软件的虚拟交换机。OpenvSwitch 是支持 OpenFlow 协议的。
 
-![](./images/network-90.png)
+![](./images/network-143.png)
 
 ![](./images/network-91.png)
 
@@ -1666,35 +1670,42 @@ OpenFlow 是 SDN 控制器和网络设备之间互通的南向接口协议，Ope
 
 MAC 层
 
-+ 匹配规则包括：源 MAC 地址是多少？（dl_src），目标 MAC 是多少？（dl_dst），所属 vlan 是多少？（dl_vlan）
++ 匹配规则包括：源 MAC 地址dl_src），目标 MAC 是（dl_dst），所属 vlan（dl_vlan）
 + 执行动作包括：修改源 MAC（mod_dl_src），修改目标 MAC（mod_dl_dst），修改 VLAN（mod_vlan_vid），删除 VLAN（strip_vlan），MAC 地址学习（learn）。
 
 网络层
 
-+ 匹配规则包括：源 IP 地址是多少？(nw_src)，目标 IP 是多少？（nw_dst）。
++ 匹配规则包括：源 IP 地址(nw_src)，目标 IP （nw_dst）。
 + 执行动作包括：修改源 IP 地址（mod_nw_src），修改目标 IP 地址（mod_nw_dst）。
 
 传输层
 
-+ 匹配规则包括：源端口是多少？（tp_src），目标端口是多少？（tp_dst）。
++ 匹配规则包括：源端口（tp_src），目标端口（tp_dst）。
 + 执行动作包括：修改源端口（mod_tp_src），修改目标端口（mod_tp_dst）。
 
 
 
 ##### VLAN 功能
 
-access port
+###### access port
 
 + 这些端口被打上了 VLAN Tag。
-+ 离开交换机的 Access port 进入计算机的以太帧中**没有 VLAN Tag**，连接到 access ports 的机器不会觉察到 VLAN 的存在。
-+ 离开计算机进入这些端口的数据帧被打上了 VLAN Tag。
++ 从access port 进入计算机的以太帧中**没有 VLAN Tag**，接受机器不会觉察到 VLAN 的存在
++ **从 access port 发出的包不带 VLAN ID(两个方向)**
 
-trunk port
+###### trunk port 
 
 + 如果 trunks 为空，则所有的 VLAN 都 trunk，也就意味着对于所有 VLAN 的包，本身带什么 VLAN ID，就是携带着什么 VLAN ID.如果没有设置 VLAN，就属于 VLAN 0，全部允许通过
-+ 如果 trunks 不为空，则仅仅带着这些 VLAN ID 的包通过。
++ 如果 trunks 不为空，则仅仅带着这些 VLAN ID 的包通过
++ trunk port一般用于交换机之间
 
 ![](./images/network-93.png)
+
+###### 例子
+
++ 192.168.100.102 ping 192.168.100.103。first_if 收到包，从 first_br 出来的包头是没有 VLAN ID 的。second_if 也收到包，由于 second_br 是 trunk port，因而出来的包头是有 VLAN ID 的，third_if 收不到包。
++ 192.168.100.100 ping 192.168.100.105, 则 second_if 和 third_if 可以收到包，**当然 ping 不通，因为 third_if 不属于某个 VLAN**。first_if 是收不到包的。second_if 能够收到包，而且包头里面是 VLAN ID=101。third_if 也能收到包，而且包头里面是 VLAN ID=101。
++ 192.168.100.101ping 192.168.100.104， second_if 和 third_if 可以收到包。first_if 是收不到包的。second_br 能够收到包，而且包头里面是 VLAN ID=102。third_if 也能收到包，而且包头里面是 VLAN ID=102。
 
 ##### 网卡绑定
 
@@ -1708,9 +1719,9 @@ trunk port
 
 #### 云计算OpenvSwitch
 
-+ 由于 OpenvSwitch 本身就是支持 VLAN 的，所有的虚拟机都可以放在一个网桥 br0 上，通过不同的用户配置不同的 tag
-+ 还可以创建一个虚拟交换机 br1，将物理网络和虚拟网络进行隔离。
-+ OpenvSwitch 可以对包的内容进行修改。通过匹配 dl_vlan，然后执行 mod_vlan_vid 来改进进出出物理机的网络包
++ 由于 OpenvSwitch 本身就是支持 VLAN 的，**所有的虚拟机都可以放在一个网桥 br0 上，通过不同的用户配置不同的 tag**
++ 还可以创建一个虚**拟交换机 br1，将物理网络和虚拟网络进行隔离。**
++ 如果物理机之间的通信和隔离还是通过 VLAN 的话，需要将虚拟机的 VLAN 和物理环境的 VLAN 对应起来，**但为了灵活性，不一定一致，**这样可以实现分别管理物理机的网络和虚拟机的网络。**OpenvSwitch 可以对包的内容进行修改。通过匹配 dl_vlan，然后执行 mod_vlan_vid 来改进出物理机的网络包**
 
 ![](./images/network-95.png)
 
@@ -1742,13 +1753,13 @@ trunk port
 
 #### 路由链表
 
-Netfilter实现就是内核模块 ip_tables。它在这五个节点上埋下函数进行处理。按功能可分为四大类：连接跟踪（conntrack）、数据包的过滤（filter）、网络地址转换（nat）和数据包的修改（mangle）。
+Netfilter实现就是**内核模块 ip_tables，用户态通过iptables命令行来干预内核的规则**。它在这五个节点上埋下函数进行处理。按功能可分为四大类：连接跟踪（conntrack）、数据包的过滤（filter）、网络地址转换（nat）和数据包的修改（mangle）。
 
 + PREROUTING 链：可以在数据包到达防火墙时改变目标地址
 + INPUT 链：过滤所有目标地址是本机的数据包
 
 + FORWARD 链：过滤所有路过本机的数据包
-+ OUTPUT 链：过滤所有由本机产生的数据包
++ OUTPUT 链：过滤/改变由本机产生的数据包
 + POSTROUTING 链：在数据包离开防火墙时改变数据包的源地址。
 
 ![](./images/network-97.png)
