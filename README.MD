@@ -2039,6 +2039,8 @@ ip netns exec 12065 ip addr add 172.17.0.2/16 dev eth0 ip netns exec 12065 ip li
 
 ### 4.3 Calico
 
+**两台物理机的物理网卡是同一个二层网络里面的**。由于两台物理机的容器网段不同，我们完全可以将两台物理机配置成为路由器，并按照容器的网段配置路由表。
+
 Calico 网络的大概思路，即不走 Overlay 网络，不引入另外的网络性能损耗，而是将转发全部用三层网络的路由转发来实现
 
 ![](./images/network-119.png)
@@ -2106,6 +2108,8 @@ Calico 使用的是 BGP 协议。在 Calico 中，每个 Node 上运行一个软
 
 
 #### 全连接复杂性
+
+![](./images/network-144.png)
 
 出了一个组件 BGP Route Reflector，它也是用 BIRD 实现的。有了它，BGP Speaker 就不用全互连了，而是都直连它，它负责将全网的路由信息广播出去。
 
