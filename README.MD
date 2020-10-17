@@ -1863,7 +1863,7 @@ VXLAN 则是从二层外面就套了一个 VXLAN 的头，这里面包含的 VXL
 
 VXLAN 作为扩展性协议，也需要一个地方对 VXLAN 的包进行封装和解封装，实现这个功能的点称为 VTEP（VXLAN Tunnel Endpoint）。
 
-VXLAN 不是点对点的，而是支持通过组播的来定位目标机器的，而非一定是这一端发出，另一端接收。当一个 VTEP 启动的时候，它们都需要通过 IGMP 协议。加入一个组播组。
+VXLAN 不是点对点的，而是支持通过组播的来定位目标机器的，而非一定是这一端发出，另一端接收。当一个 VTEP 启动的时候，**它们都需要通过 IGMP(三层) 协议。加入一个组播组。**
 
 ![](./images/network-110.png)
 
@@ -1896,7 +1896,16 @@ VXLAN 不是点对点的，而是支持通过组播的来定位目标机器的�
 
 #### 环境隔离 Namesapce
 
-网络的 namespace 由 ip netns 命令操作。它可以创建、删除、查询 namespace。routerns 相当于一个路由器，一断连接容器的docker0网桥，一端连接物理网卡
+网络的 namespace 由 ip netns 命令操作。它可以创建、删除、查询 namespace。
+
+routerns 相当于一个路由器
+
++ 开启网关配置和DHCP服务
++ 一端连接容器的docker0网桥
++ 一端连接物理网卡
++ 配置路由协议，SNAT和DNAT
+
+
 
 ![](./images/network-113.png)
 
@@ -1913,7 +1922,7 @@ ovs-vsctl -- add-port br0 taprouter -- set Interface taprouter type=internal -- 
 # 网卡加入namesapce
 ip link set taprouter netns routerns
 
-# 要给这个网卡配置一个 IP 地址，当然应该是虚拟机网络的网关地址。例如虚拟机私网网段为 192.168.1.0/24，网关的地址往往为 192.168.1.1。
+# 要给这个网卡配置一个IP 地址，当然应该是虚拟机网络的网关地址。例如虚拟机私网网段为 192.168.1.0/24，网关的地址往往为 192.168.1.1。
 ip netns exec routerns ip -4 addr add 192.168.1.1/24 brd 192.168.1.255 scope global dev taprouter
 
 # 为了访问外网，还需要另一个网卡连在外网网桥 br-ex 上，并且塞在 namespace 里面。
@@ -1967,6 +1976,7 @@ ip link add name veth1 mtu 1500 type veth peer name veth2 mtu 1500
 ip link set veth1 master testbr    
 ip link set veth1 up
 
+# 假设结果为 12065，这个就是 namespace 名字。
 # 另一端放到容器里, 通过软连接
 docker inspect '--format={{ .State.Pid }}' test
 rm -f /var/run/netns/12065    
@@ -1978,6 +1988,9 @@ ip netns exec 12065 ip link set veth2 name eth0
 
 # 给容器内网卡设置 ip 地址。
 ip netns exec 12065 ip addr add 172.17.0.2/16 dev eth0 ip netns exec 12065 ip link set eth0 up
+
+# 在宿主机上，有这么一条 iptables 规则
+-A POSTROUTING -s 172.17.0.0/16 ! -o docker0 -j MASQUERADE
 ```
 
 
@@ -2013,13 +2026,13 @@ ip netns exec 12065 ip addr add 172.17.0.2/16 dev eth0 ip netns exec 12065 ip li
 
 #### VXLAN 方案
 
-如果使用 VXLAN，就不需要打开一个 TUN 设备了，而是要建立一个 VXLAN 的 VTEP
+使用 VXLAN要建立一个 VXLAN 的 VTEP
 
 ![](./images/network-118.png)
 
 + 当网络包从物理机 A 上的容器 A 发送给物理机 B 上的容器 B，在容器 A 里面通过默认路由到达物理机 A 上的 docker0 网卡，然后根据路由规则，在物理机 A 上，将包转发给 flannel.1。这个时候 flannel.1 就是一个 VXLAN 的 VTEP 了，它将网络包进行封装。
-  + 内部的 MAC 地址这样写：源为物理机 A 的 flannel.1 的 MAC 地址，目标为物理机 B 的 flannel.1 的 MAC 地址，**在外面加上 VXLAN 的头。**
-  + 外层的 IP 地址这样写：源为物理机 A 的 IP 地址，目标为物理机 B 的 IP 地址，外面加上物理机的 MAC 地址。
+  + 内部的 MAC 地址：源为物理机 A 的 flannel.1 的 MAC 地址，目标为物理机 B 的 flannel.1 的 MAC 地址，**在外面加上 VXLAN 的头。**
+  + 外层的 IP 地址：源为物理机 A 的 IP 地址，目标为物理机 B 的 IP 地址，外面加上物理机的 MAC 地址。
 + 能通过 VXLAN 将包转发到另一台机器，从物理机 B 的 flannel.1 上解包，变成内部的网络包，通过物理机 B 上的路由转发到 docker0，然后转发到容器 B 里面。通信成功。
 
 
